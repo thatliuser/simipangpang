@@ -42,7 +42,7 @@ func (b *Bot) onUpdateChannel(i *discord.InteractionCreate) {
 			return
 		}
 		channel := cmd.Options[0].ChannelValue(b.session)
-		if channel != nil {
+		if channel != nil && channel.Type == discord.ChannelTypeGuildText {
 			b.servers[i.GuildID] = Server{
 				UpdateChannel: channel.ID,
 			}
@@ -91,21 +91,26 @@ func (b *Bot) addCommands() error {
 			command: &discord.ApplicationCommand{
 				Name:        "update_channel",
 				Description: "Set or get the update channel for the server",
+				Type:        discord.ChatApplicationCommand,
 				// WTF is the point of this
 				DefaultMemberPermissions: &manage,
 				Options: []*discord.ApplicationCommandOption{
 					{
-						Name: "get",
-						Type: discord.ApplicationCommandOptionSubCommand,
+						Name:        "get",
+						Description: "Get the update channel for the server",
+						Type:        discord.ApplicationCommandOptionSubCommand,
+						Options:     []*discord.ApplicationCommandOption{},
 					},
 					{
-						Name: "set",
-						Type: discord.ApplicationCommandOptionSubCommand,
+						Name:        "set",
+						Description: "Set the update channel for the server",
+						Type:        discord.ApplicationCommandOptionSubCommand,
 						Options: []*discord.ApplicationCommandOption{
 							{
-								Name:     "channel",
-								Type:     discord.ApplicationCommandOptionChannel,
-								Required: true,
+								Name:        "channel",
+								Description: "The new channel to be set as the update channel",
+								Type:        discord.ApplicationCommandOptionChannel,
+								Required:    true,
 							},
 						},
 					},
@@ -117,6 +122,7 @@ func (b *Bot) addCommands() error {
 			command: &discord.ApplicationCommand{
 				Name:        "stats",
 				Description: "Get simipangpang's stats",
+				Type:        discord.ChatApplicationCommand,
 			},
 			handler: b.onStats,
 		},

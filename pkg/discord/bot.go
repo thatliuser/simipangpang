@@ -78,11 +78,11 @@ func (b *Bot) onMessage(_ *discord.Session, m *discord.MessageCreate) {
 }
 
 func (b *Bot) Run(ctx context.Context) error {
-	if err := b.addCommands(); err != nil {
-		return fmt.Errorf("couldn't add slash commands: %v", err)
-	}
 	if err := b.session.Open(); err != nil {
 		return fmt.Errorf("couldn't open discord session: %v", err)
+	}
+	if err := b.addCommands(); err != nil {
+		return fmt.Errorf("couldn't add slash commands: %v", err)
 	}
 
 	b.log.Println("Discord bot up")
