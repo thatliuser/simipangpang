@@ -8,6 +8,7 @@ import (
 
 	env "github.com/joho/godotenv"
 	"github.com/thatliuser/simipangpang/pkg/discord"
+	"github.com/thatliuser/simipangpang/pkg/riot"
 )
 
 func interruptCtx() (context.Context, context.CancelFunc) {
@@ -21,13 +22,11 @@ func main() {
 	if err := env.Load(); err != nil {
 		log.Fatalf("Couldn't load dotenv file: %v", err)
 	}
-	/*
-		riot, err := riot.New()
-		if err != nil {
-			log.Fatalf("Couldn't create Riot client: %v", err)
-		}
-	*/
-	bot, err := discord.New(nil, os.Stderr)
+	riot, err := riot.New()
+	if err != nil {
+		log.Fatalf("Couldn't create Riot client: %v", err)
+	}
+	bot, err := discord.New(riot, os.Stderr)
 	if err != nil {
 		log.Fatalf("Couldn't create Discord bot: %v", err)
 	}

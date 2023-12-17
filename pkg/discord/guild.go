@@ -68,7 +68,7 @@ func (b *Bot) onUpdateChannel(i *discord.InteractionCreate) {
 
 // TODO: Move the lookup into a different function so that the other Lookup call isn't weirdly distributed
 func (b *Bot) onStats(i *discord.InteractionCreate) {
-	resp, err := b.client.Lookup(riotUser)
+	resp, err := b.client.Lookup(b.ctx, riotUser, riotDiscrim)
 	if err != nil {
 		resp = "Couldn't look up user!"
 	}

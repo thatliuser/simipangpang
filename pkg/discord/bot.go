@@ -20,15 +20,17 @@ type Bot struct {
 	session *discord.Session
 	client  *riot.Client
 	log     *log.Logger
+	ctx     context.Context
 	servers map[string]Server
 }
 
 const (
-	tokenEnv = "DISCORD_TOKEN"
-	saveName = "servers"
-	saveExt  = ".json"
-	saveFile = saveName + saveExt
-	riotUser = "simipangpang"
+	tokenEnv    = "DISCORD_TOKEN"
+	saveName    = "servers"
+	saveExt     = ".json"
+	saveFile    = saveName + saveExt
+	riotUser    = "simipangpang"
+	riotDiscrim = "NA1"
 )
 
 func New(client *riot.Client, output io.Writer) (*Bot, error) {
@@ -67,7 +69,7 @@ func (b *Bot) onMessage(_ *discord.Session, m *discord.MessageCreate) {
 
 	b.log.Printf("Got message '%v' from %v", m.Content, m.Author.Username)
 
-	resp, err := b.client.Lookup(riotUser)
+	resp, err := b.client.Lookup(b.ctx, riotUser, riotDiscrim)
 	if err != nil {
 		resp = "Couldn't look up user!"
 	}
@@ -78,9 +80,12 @@ func (b *Bot) onMessage(_ *discord.Session, m *discord.MessageCreate) {
 }
 
 func (b *Bot) Run(ctx context.Context) error {
+	// TODO: This is a bit gross don't do this
+	b.ctx = ctx
 	if err := b.session.Open(); err != nil {
 		return fmt.Errorf("couldn't open discord session: %v", err)
 	}
+	defer b.session.Close()
 	if err := b.addCommands(); err != nil {
 		return fmt.Errorf("couldn't add slash commands: %v", err)
 	}
@@ -96,7 +101,6 @@ func (b *Bot) Run(ctx context.Context) error {
 	}()
 	// Wait for context to expire
 	<-ctx.Done()
-	b.session.Close()
 
 	return nil
 }
