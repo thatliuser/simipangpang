@@ -66,19 +66,25 @@ func (b *Bot) onUpdateChannel(i *discord.InteractionCreate) {
 	}
 }
 
-// TODO: Move the lookup into a different function so that the other Lookup call isn't weirdly distributed
 func (b *Bot) onStats(i *discord.InteractionCreate) {
-	resp, err := b.client.Lookup(b.ctx, riotUser, riotDiscrim)
+	embeds, err := b.stats(riotUser, riotDiscrim)
 	if err != nil {
-		resp = "Couldn't look up user!"
-	}
-	if err := b.session.InteractionRespond(i.Interaction, &discord.InteractionResponse{
-		Type: discord.InteractionResponseChannelMessageWithSource,
-		Data: &discord.InteractionResponseData{
-			Content: resp,
-		},
-	}); err != nil {
-		b.log.Printf("Error sending reply to message: %v", err)
+		b.session.InteractionRespond(i.Interaction, &discord.InteractionResponse{
+			Type: discord.InteractionResponseChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{
+				Flags:   discord.MessageFlagsEphemeral,
+				Content: err.Error(),
+			},
+		})
+	} else {
+		if err := b.session.InteractionRespond(i.Interaction, &discord.InteractionResponse{
+			Type: discord.InteractionResponseChannelMessageWithSource,
+			Data: &discord.InteractionResponseData{
+				Embeds: embeds,
+			},
+		}); err != nil {
+			b.log.Printf("Error sending reply to message: %v", err)
+		}
 	}
 }
 

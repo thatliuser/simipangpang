@@ -56,7 +56,6 @@ func New(client *riot.Client, output io.Writer) (*Bot, error) {
 	return b, nil
 }
 
-// TODO: Move the lookup into a different function so that the other Lookup call isn't weirdly distributed
 func (b *Bot) onMessage(_ *discord.Session, m *discord.MessageCreate) {
 	// Ignore messages sent by ourselves
 	if m.Author.ID == b.session.State.User.ID {
@@ -69,13 +68,15 @@ func (b *Bot) onMessage(_ *discord.Session, m *discord.MessageCreate) {
 
 	b.log.Printf("Got message '%v' from %v", m.Content, m.Author.Username)
 
-	resp, err := b.client.Lookup(b.ctx, riotUser, riotDiscrim)
+	embeds, err := b.stats(riotUser, riotDiscrim)
 	if err != nil {
-		resp = "Couldn't look up user!"
-	}
-
-	if _, err := b.session.ChannelMessageSendReply(m.ChannelID, resp, m.Reference()); err != nil {
-		b.log.Printf("Error sending reply to message: %v", err)
+		b.log.Printf("Error retrieving stats for user: %v", err)
+		// Ignoring error if reply isn't sent because it isn't so useful
+		b.session.ChannelMessageSendReply(m.ChannelID, err.Error(), m.Reference())
+	} else {
+		if _, err := b.session.ChannelMessageSendEmbedsReply(m.ChannelID, embeds, m.Reference()); err != nil {
+			b.log.Printf("Error sending reply to message: %v", err)
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	env "github.com/joho/godotenv"
 	"github.com/thatliuser/simipangpang/pkg/discord"
@@ -22,7 +23,7 @@ func main() {
 	if err := env.Load(); err != nil {
 		log.Fatalf("Couldn't load dotenv file: %v", err)
 	}
-	riot, err := riot.New()
+	riot, err := riot.New(time.Second * 10)
 	if err != nil {
 		log.Fatalf("Couldn't create Riot client: %v", err)
 	}
@@ -30,6 +31,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Couldn't create Discord bot: %v", err)
 	}
+	defer bot.Save()
 
 	if err := bot.Run(ctx); err != nil {
 		log.Fatalf("Couldn't run Discord bot: %v", err)
