@@ -60,10 +60,28 @@ func (r *Client) ChampionByName(name string) (*ddragon.FullChampion, error) {
 	defer cancel()
 	champ, err := r.client.DDragon.Champion.ByName(ctx, r.version, ddragon.EnUS, name)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't lookup champion by name: %v", err)
+		return nil, fmt.Errorf("couldn't lookup champion by name %v: %v", name, err)
 	} else {
 		return champ, nil
 	}
+}
+
+func (r *Client) ChampionByID(id int) (*ddragon.FullChampion, error) {
+	ctx, cancel := r.newContext()
+	defer cancel()
+	champs, err := r.client.DDragon.Champion.AllChampions(ctx, r.version, ddragon.EnUS)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch all champions: %v", err)
+	}
+	for _, champ := range champs {
+		key, err := strconv.Atoi(champ.Key)
+		if err != nil || key != id {
+			// Ignore this because it's invalid or doesn't match
+			continue
+		}
+		return r.ChampionByName(champ.ID)
+	}
+	return nil, fmt.Errorf("couldn't find champion with id %v", id)
 }
 
 type Account struct {
@@ -118,33 +136,29 @@ func (r *Client) AccountByRiotID(name string, discrim string) (*Account, error) 
 	}, nil
 }
 
-func (r *Client) MasteryForChamp(account *Account, champ *ddragon.FullChampion) (*lol.ChampionMasteryV4DTO, error) {
+func (r *Client) IconURLForChamp(champ *ddragon.FullChampion) string {
+	return fmt.Sprintf("https://ddragon.leagueoflegends.com/cdn/%v/img/champion/%v.png", r.version, champ.ID)
+}
+
+func (r *Client) MasteryForChamp(account *Account, champ *ddragon.FullChampion) (int32, error) {
 	ctx, cancel := r.newContext()
 	defer cancel()
 	id, err := strconv.ParseInt(champ.Key, 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't convert champion key %v to int: %v", champ.Key, err)
+		return 0, fmt.Errorf("couldn't convert champion key %v to int: %v", champ.Key, err)
 	}
 	mastery, err := r.client.LOL.ChampionMasteryV4.MasteryByPUUID(ctx, r.platform, account.PUUID, id)
 	if err != nil {
-		return nil, fmt.Errorf("couldn't get mastery for champion %v (id %v): %v", champ.Name, id, err)
+		return 0, fmt.Errorf("couldn't get mastery for champion %v (id %v): %v", champ.Name, id, err)
 	} else {
-		return mastery, nil
+		return mastery.ChampionPoints, nil
 	}
 }
 
-type Match struct {
-	Kills   int32
-	Deaths  int32
-	Assists int32
-	Won     bool
-	Champ   int32
-}
-
-func (r *Client) MatchesByIDs(account *Account, ids []string) ([]Match, error) {
+func (r *Client) MatchesByIDs(account *Account, ids []string) ([]*Match, error) {
 	ctx, cancel := r.newContext()
 	defer cancel()
-	matches := []Match{}
+	matches := []*Match{}
 
 	infoForPlayer := func(account *Account, players []lol.ParticipantV5DTO) *lol.ParticipantV5DTO {
 		for _, player := range players {
@@ -164,30 +178,41 @@ func (r *Client) MatchesByIDs(account *Account, ids []string) ([]Match, error) {
 		if player == nil {
 			return nil, fmt.Errorf("couldn't find player %v in match %v", account.Name, id)
 		}
+		if player.GameEndedInEarlySurrender {
+			// This is a remake so we can ignore it. It basically wasn't played
+			continue
+		}
+		// Convert from ms to s (the timestamp is in ms)
+		time := time.Unix(info.Info.GameCreation/1000, 0)
 
-		matches = append(matches, Match{
+		matches = append(matches, &Match{
 			Kills:   player.Kills,
 			Deaths:  player.Deaths,
 			Assists: player.Assists,
 			Won:     player.Win,
 			Champ:   player.ChampionID,
+			Time:    time,
 		})
 	}
 	return matches, nil
 }
 
-func (r *Client) RankedMatchesSince(account *Account, since time.Time) ([]string, error) {
+func (r *Client) RankedMatchesSince(account *Account, since time.Time) ([]*Match, error) {
 	ctx, cancel := r.newContext()
 	defer cancel()
 	start := since.Unix()
 	end := time.Now().Unix()
-	list, err := r.client.LOL.MatchV5.ListByPUUID(
+	ids, err := r.client.LOL.MatchV5.ListByPUUID(
 		ctx, r.region, account.PUUID,
 		start, end, -1, "ranked", 0, 100,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get match history for %v: %v", account.Name, err)
+	}
+	matches, err := r.MatchesByIDs(account, ids)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't lookup matches by ids: %v", err)
 	} else {
-		return list, nil
+		return matches, nil
 	}
 }

@@ -20,7 +20,6 @@ type Bot struct {
 	session *discord.Session
 	client  *riot.Client
 	log     *log.Logger
-	ctx     context.Context
 	servers map[string]Server
 }
 
@@ -81,8 +80,6 @@ func (b *Bot) onMessage(_ *discord.Session, m *discord.MessageCreate) {
 }
 
 func (b *Bot) Run(ctx context.Context) error {
-	// TODO: This is a bit gross don't do this
-	b.ctx = ctx
 	if err := b.session.Open(); err != nil {
 		return fmt.Errorf("couldn't open discord session: %v", err)
 	}
@@ -91,7 +88,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		return fmt.Errorf("couldn't add slash commands: %v", err)
 	}
 
-	b.log.Println("Discord bot up")
+	b.log.Println("Discord bot up!")
 
 	// Create a ticker to send stats every once in a while
 	tick := time.NewTicker(time.Second * 10)

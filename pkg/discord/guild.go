@@ -31,7 +31,7 @@ func (b *Bot) onUpdateChannel(i *discord.InteractionCreate) {
 	case "get":
 		// Respond the current channel if set
 		if val, ok := b.servers[i.GuildID]; ok {
-			resp = fmt.Sprintf("The current update channel is <#%v>", val)
+			resp = fmt.Sprintf("The current update channel is <#%v>", val.UpdateChannel)
 		} else {
 			resp = "The current update channel is unset"
 		}
@@ -46,6 +46,7 @@ func (b *Bot) onUpdateChannel(i *discord.InteractionCreate) {
 			b.servers[i.GuildID] = Server{
 				UpdateChannel: channel.ID,
 			}
+			b.log.Printf("Setting update channel to %v for server %v", channel.ID, i.GuildID)
 			resp = fmt.Sprintf("Success! The new update channel is <#%v>", channel.ID)
 		} else {
 			resp = "Channel passed is invalid; please try again with a valid channel"
@@ -67,22 +68,22 @@ func (b *Bot) onUpdateChannel(i *discord.InteractionCreate) {
 }
 
 func (b *Bot) onStats(i *discord.InteractionCreate) {
+	// Acknowledge the interaction first
+	b.session.InteractionRespond(i.Interaction, &discord.InteractionResponse{
+		Type: discord.InteractionResponseDeferredChannelMessageWithSource,
+	})
 	embeds, err := b.stats(riotUser, riotDiscrim)
 	if err != nil {
-		b.session.InteractionRespond(i.Interaction, &discord.InteractionResponse{
-			Type: discord.InteractionResponseChannelMessageWithSource,
-			Data: &discord.InteractionResponseData{
-				Flags:   discord.MessageFlagsEphemeral,
-				Content: err.Error(),
-			},
+		errString := err.Error()
+		b.session.InteractionResponseEdit(i.Interaction, &discord.WebhookEdit{
+			Content: &errString,
 		})
 	} else {
-		if err := b.session.InteractionRespond(i.Interaction, &discord.InteractionResponse{
-			Type: discord.InteractionResponseChannelMessageWithSource,
-			Data: &discord.InteractionResponseData{
-				Embeds: embeds,
-			},
-		}); err != nil {
+		// Edit the response for later
+		if _, err := b.session.InteractionResponseEdit(i.Interaction, &discord.WebhookEdit{
+			Embeds: &embeds,
+		},
+		); err != nil {
 			b.log.Printf("Error sending reply to message: %v", err)
 		}
 	}
