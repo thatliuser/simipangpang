@@ -155,7 +155,7 @@ func (r *Client) MasteryForChamp(account *Account, champ *ddragon.FullChampion) 
 	}
 }
 
-func (r *Client) MatchesByIDs(account *Account, ids []string) ([]*Match, error) {
+func (r *Client) matchesByIDs(account *Account, ids []string) ([]*Match, error) {
 	ctx, cancel := r.newContext()
 	defer cancel()
 	matches := []*Match{}
@@ -209,7 +209,7 @@ func (r *Client) RankedMatchesSince(account *Account, since time.Time) ([]*Match
 	if err != nil {
 		return nil, fmt.Errorf("couldn't get match history for %v: %v", account.Name, err)
 	}
-	matches, err := r.MatchesByIDs(account, ids)
+	matches, err := r.matchesByIDs(account, ids)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't lookup matches by ids: %v", err)
 	} else {

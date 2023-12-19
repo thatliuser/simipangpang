@@ -9,12 +9,15 @@ import (
 	"io"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	discord "github.com/bwmarrin/discordgo"
 	"github.com/thatliuser/simipangpang/pkg/riot"
 )
+
+type Server struct {
+	UpdateChannel string
+}
 
 type Bot struct {
 	session *discord.Session
@@ -24,12 +27,10 @@ type Bot struct {
 }
 
 const (
-	tokenEnv    = "DISCORD_TOKEN"
-	saveName    = "servers"
-	saveExt     = ".json"
-	saveFile    = saveName + saveExt
-	riotUser    = "simipangpang"
-	riotDiscrim = "NA1"
+	tokenEnv = "DISCORD_TOKEN"
+	saveName = "servers"
+	saveExt  = ".json"
+	saveFile = saveName + saveExt
 )
 
 func New(client *riot.Client, output io.Writer) (*Bot, error) {
@@ -47,7 +48,6 @@ func New(client *riot.Client, output io.Writer) (*Bot, error) {
 		log:     log.New(output, "discord.Bot: ", log.Ldate|log.Ltime),
 		servers: make(map[string]Server),
 	}
-	b.session.AddHandler(b.onMessage)
 	b.session.Identify.Intents = discord.IntentMessageContent | discord.IntentGuildMessages
 	if err := b.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("couldn't load savefile: %v", err)
@@ -55,36 +55,12 @@ func New(client *riot.Client, output io.Writer) (*Bot, error) {
 	return b, nil
 }
 
-func (b *Bot) onMessage(_ *discord.Session, m *discord.MessageCreate) {
-	// Ignore messages sent by ourselves
-	if m.Author.ID == b.session.State.User.ID {
-		return
-	}
-
-	if !strings.Contains(strings.ToLower(m.Content), riotUser) {
-		return
-	}
-
-	b.log.Printf("Got message '%v' from %v", m.Content, m.Author.Username)
-
-	embeds, err := b.stats(riotUser, riotDiscrim)
-	if err != nil {
-		b.log.Printf("Error retrieving stats for user: %v", err)
-		// Ignoring error if reply isn't sent because it isn't so useful
-		b.session.ChannelMessageSendReply(m.ChannelID, err.Error(), m.Reference())
-	} else {
-		if _, err := b.session.ChannelMessageSendEmbedsReply(m.ChannelID, embeds, m.Reference()); err != nil {
-			b.log.Printf("Error sending reply to message: %v", err)
-		}
-	}
-}
-
 func (b *Bot) Run(ctx context.Context) error {
 	if err := b.session.Open(); err != nil {
 		return fmt.Errorf("couldn't open discord session: %v", err)
 	}
 	defer b.session.Close()
-	if err := b.addCommands(); err != nil {
+	if err := b.addListeners(); err != nil {
 		return fmt.Errorf("couldn't add slash commands: %v", err)
 	}
 

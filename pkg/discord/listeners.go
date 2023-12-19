@@ -1,29 +1,21 @@
-// Guild-specific stuff
+// Event listeners that tie everything together (and util to go along with them)
 
 package discord
 
 import (
 	"fmt"
+	"strings"
 
 	discord "github.com/bwmarrin/discordgo"
+	"github.com/thatliuser/simipangpang/pkg/riot"
 )
-
-type Server struct {
-	UpdateChannel string
-}
-
-type Handler func(*discord.InteractionCreate)
-
-type Command struct {
-	command *discord.ApplicationCommand
-	handler Handler
-}
 
 func (b *Bot) onUpdateChannel(i *discord.InteractionCreate) {
 	options := i.ApplicationCommandData().Options
 	// Unsure if this is necessary but redundancy is good
 	if len(options) < 1 {
 		b.log.Printf("Got an empty set of options to update channel")
+		return
 	}
 	cmd := options[0]
 	resp := ""
@@ -67,32 +59,110 @@ func (b *Bot) onUpdateChannel(i *discord.InteractionCreate) {
 	}
 }
 
+const (
+	name    = "simipangpang"
+	discrim = "NA1"
+)
+
+func (b *Bot) embedsFromVerb(verb string) ([]*discord.MessageEmbed, error) {
+	account, err := b.client.AccountByRiotID(name, discrim)
+	if err != nil {
+		return nil, err
+	}
+	// We only need the account for this one
+	if verb == "short" {
+		return b.shortEmbed(account), nil
+	}
+
+	matches, err := b.matchesByPerformance(account)
+	if err != nil {
+		return nil, err
+	}
+
+	embedFunc := (func(*riot.Account, []*riot.Match) ([]*discord.MessageEmbed, error))(nil)
+	switch verb {
+	case "best":
+		embedFunc = b.bestMatchEmbed
+	case "worst":
+		embedFunc = b.worstMatchEmbed
+	case "all":
+		embedFunc = b.allEmbed
+	default:
+		return nil, fmt.Errorf("verb not recognized: %v", verb)
+	}
+
+	return embedFunc(account, matches)
+}
+
 func (b *Bot) onStats(i *discord.InteractionCreate) {
 	// Acknowledge the interaction first
 	b.session.InteractionRespond(i.Interaction, &discord.InteractionResponse{
 		Type: discord.InteractionResponseDeferredChannelMessageWithSource,
 	})
-	embeds, err := b.stats(riotUser, riotDiscrim)
+
+	options := i.ApplicationCommandData().Options
+	if len(options) != 1 {
+		b.log.Printf("Length of options is too short or too long (%v)", len(options))
+		return
+	}
+
+	embeds, err := b.embedsFromVerb(options[0].Name)
+
 	if err != nil {
+		b.log.Printf("Error retrieving stats for user: %v", err)
 		errString := err.Error()
-		b.session.InteractionResponseEdit(i.Interaction, &discord.WebhookEdit{
+		if _, err := b.session.InteractionResponseEdit(i.Interaction, &discord.WebhookEdit{
 			Content: &errString,
-		})
+		}); err != nil {
+			b.log.Printf("Error sending error replying to message: %v", err)
+		}
 	} else {
 		// Edit the response for later
 		if _, err := b.session.InteractionResponseEdit(i.Interaction, &discord.WebhookEdit{
 			Embeds: &embeds,
-		},
-		); err != nil {
+		}); err != nil {
 			b.log.Printf("Error sending reply to message: %v", err)
 		}
 	}
 }
 
-// Add slash commands
-func (b *Bot) addCommands() error {
+func (b *Bot) onMessage(_ *discord.Session, m *discord.MessageCreate) {
+	// Ignore messages sent by ourselves
+	if m.Author.ID == b.session.State.User.ID {
+		return
+	}
+
+	if !strings.Contains(strings.ToLower(m.Content), name) {
+		return
+	}
+
+	b.log.Printf("Got message '%v' from %v", m.Content, m.Author.Username)
+
+	embeds, err := b.embedsFromVerb("all")
+	if err != nil {
+		b.log.Printf("Error retrieving stats for user: %v", err)
+		// Ignoring error if reply isn't sent because it isn't so useful
+		if _, err := b.session.ChannelMessageSendReply(m.ChannelID, err.Error(), m.Reference()); err != nil {
+			b.log.Printf("Error sending error replying to message: %v", err)
+		}
+	} else {
+		if _, err := b.session.ChannelMessageSendEmbedsReply(m.ChannelID, embeds, m.Reference()); err != nil {
+			b.log.Printf("Error sending reply to message: %v", err)
+		}
+	}
+}
+
+// Actually add the functionality to the bot
+func (b *Bot) addListeners() error {
 	manage := int64(discord.PermissionManageServer)
 	// This is declared locally because you should only call this once on init
+	type Handler func(*discord.InteractionCreate)
+
+	type Command struct {
+		command *discord.ApplicationCommand
+		handler Handler
+	}
+
 	commands := []Command{
 		{
 			command: &discord.ApplicationCommand{
@@ -106,7 +176,6 @@ func (b *Bot) addCommands() error {
 						Name:        "get",
 						Description: "Get the update channel for the server",
 						Type:        discord.ApplicationCommandOptionSubCommand,
-						Options:     []*discord.ApplicationCommandOption{},
 					},
 					{
 						Name:        "set",
@@ -130,6 +199,28 @@ func (b *Bot) addCommands() error {
 				Name:        "stats",
 				Description: "Get simipangpang's stats",
 				Type:        discord.ChatApplicationCommand,
+				Options: []*discord.ApplicationCommandOption{
+					{
+						Name:        "short",
+						Description: "Get a stats summary",
+						Type:        discord.ApplicationCommandOptionSubCommand,
+					},
+					{
+						Name:        "best",
+						Description: "Get the best match for the week",
+						Type:        discord.ApplicationCommandOptionSubCommand,
+					},
+					{
+						Name:        "worst",
+						Description: "Get the worst match for the week",
+						Type:        discord.ApplicationCommandOptionSubCommand,
+					},
+					{
+						Name:        "all",
+						Description: "Get all available stats",
+						Type:        discord.ApplicationCommandOptionSubCommand,
+					},
+				},
 			},
 			handler: b.onStats,
 		},
@@ -151,6 +242,7 @@ func (b *Bot) addCommands() error {
 			b.log.Printf("Passed invalid command name %v", command)
 		}
 	})
+	b.session.AddHandler(b.onMessage)
 
 	return nil
 }
