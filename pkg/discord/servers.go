@@ -18,5 +18,6 @@ func (b *Bot) ServerFor(id string) (*Server, error) {
 		return nil, fmt.Errorf("couldn't create new server from id %v: %v", id, err)
 	}
 
+	b.servers[id] = server
 	return server, nil
 }

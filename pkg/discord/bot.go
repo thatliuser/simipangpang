@@ -46,7 +46,6 @@ func (b *Bot) Load() error {
 
 func (b *Bot) Save() {
 	for id, server := range b.servers {
-		b.log.Printf("Saving server %v", id)
 		if err := server.Save(); err != nil {
 			b.log.Printf("Failed to save server with ID %v: %v", id, err)
 		}

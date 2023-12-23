@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"strings"
 
 	discord "github.com/bwmarrin/discordgo"
 )
@@ -37,7 +38,7 @@ func (s *Server) SaveFileName() string {
 }
 
 func (s *Server) BackupFileName() string {
-	return fmt.Sprintf("%v/%v-back%v", stateDir, s.guild.ID, saveExt)
+	return fmt.Sprintf("%v/%v-backup%v", stateDir, s.guild.ID, saveExt)
 }
 
 func (s *Server) readFile(name string) ([]byte, error) {
@@ -74,6 +75,7 @@ func (s *Server) Load(state ServerState) error {
 
 	if state.ChannelID == "" {
 		// No update channel set, so return early
+		s.channel = nil
 		return nil
 	}
 
@@ -125,8 +127,12 @@ func (s *Server) Save() error {
 
 	state := ServerState{
 		GuildID:   s.guild.ID,
-		ChannelID: s.channel.ID,
+		ChannelID: "",
 	}
+	if s.channel != nil {
+		state.ChannelID = s.channel.ID
+	}
+
 	data, err := json.MarshalIndent(&state, "", "\t")
 	if err != nil {
 		return fmt.Errorf("couldn't marshal server data: %v", err)
@@ -176,9 +182,15 @@ func NewServer(session *discord.Session, state ServerState) (*Server, error) {
 }
 
 func ServerFromFile(session *discord.Session, guildID string) (*Server, error) {
-	s := &Server{
-		session: session,
+	// Preliminary load so SaveFileName() doesn't deref a nil pointer
+	s, err := NewServer(session, ServerState{
+		GuildID:   guildID,
+		ChannelID: "",
+	})
+	if err != nil {
+		return nil, err
 	}
+
 	if err := s.LoadFile(); err != nil {
 		return nil, fmt.Errorf("couldn't load server from file: %v", err)
 	}
@@ -187,5 +199,19 @@ func ServerFromFile(session *discord.Session, guildID string) (*Server, error) {
 }
 
 func AllServerIDs() ([]string, error) {
-	return fs.Glob(os.DirFS(stateDir), fmt.Sprintf("*%v", saveExt))
+	ids := []string{}
+	err := fs.WalkDir(os.DirFS(stateDir), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() || strings.Contains(path, "backup") {
+			return nil
+		}
+
+		ids = append(ids, strings.TrimSuffix(path, saveExt))
+		return nil
+	})
+
+	return ids, err
 }

@@ -3,8 +3,6 @@
 package discord
 
 import (
-	"log"
-
 	discord "github.com/bwmarrin/discordgo"
 )
 
@@ -16,26 +14,20 @@ func Channel(s *discord.Session, channelID string) (*discord.Channel, error) {
 		if err != nil {
 			return nil, err
 		}
-		log.Printf("Adding channel %v to cache", channel.Mention())
 		s.State.ChannelAdd(channel)
-	} else {
-		log.Printf("Cache hit on channel %v", channel.Mention())
 	}
+
 	return channel, nil
 }
 
 func Guild(s *discord.Session, guildID string) (*discord.Guild, error) {
-	guild, err := s.State.Guild(guildID)
+	// We can't used a cached guild because the roles aren't necessarily saved in the cache
+	guild, err := s.Guild(guildID)
 	if err != nil {
-		guild, err = s.Guild(guildID)
-		if err != nil {
-			return nil, err
-		}
-		log.Printf("Adding guild %v to cache", guild.Name)
-		s.State.GuildAdd(guild)
-	} else {
-		log.Printf("Cache hit on guild %v", guild.Name)
+		return nil, err
 	}
+	s.State.GuildAdd(guild)
+
 	return guild, nil
 }
 
@@ -46,10 +38,7 @@ func Member(s *discord.Session, guildID string, userID string) (*discord.Member,
 		if err != nil {
 			return nil, err
 		}
-		log.Printf("Adding member %v#%v to cache", member.User.Username, member.User.Discriminator)
 		s.State.MemberAdd(member)
-	} else {
-		log.Printf("Cache hit on member %v#%v", member.User.Username, member.User.Discriminator)
 	}
 	return member, nil
 }

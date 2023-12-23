@@ -118,7 +118,7 @@ func (b *Bot) onStats(i *discord.InteractionCreate) {
 
 	if err != nil {
 		b.log.Printf("Error retrieving stats for user: %v", err)
-		errString := err.Error()
+		errString := fmt.Sprintf(":warning: Failed with error: %v", err)
 		if _, err := b.session.InteractionResponseEdit(i.Interaction, &discord.WebhookEdit{
 			Content: &errString,
 		}); err != nil {
