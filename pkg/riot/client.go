@@ -55,6 +55,17 @@ func (r *Client) newContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), r.timeout)
 }
 
+func (r *Client) TopChampionsByMastery(account *Account, count int32) ([]lol.ChampionMasteryV4DTO, error) {
+	ctx, cancel := r.newContext()
+	defer cancel()
+	ids, err := r.client.LOL.ChampionMasteryV4.TopMasteriesByPUUID(ctx, r.platform, account.PUUID, count)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't fetch top masteries: %v", err)
+	} else {
+		return ids, nil
+	}
+}
+
 func (r *Client) ChampionByName(name string) (*ddragon.FullChampion, error) {
 	ctx, cancel := r.newContext()
 	defer cancel()
@@ -95,6 +106,10 @@ type Account struct {
 	Wins       int32
 	Losses     int32
 	Points     int32
+}
+
+func (a *Account) Winrate() float64 {
+	return float64(a.Wins*100) / float64(a.Wins+a.Losses)
 }
 
 func (r *Client) AccountByRiotID(name string, discrim string) (*Account, error) {

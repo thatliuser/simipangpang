@@ -5,47 +5,54 @@ package discord
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	discord "github.com/bwmarrin/discordgo"
 	"github.com/thatliuser/simipangpang/pkg/riot"
 )
 
-func (b *Bot) onUpdateChannel(i *discord.InteractionCreate) {
-	options := i.ApplicationCommandData().Options
-	// Unsure if this is necessary but redundancy is good
-	if len(options) < 1 {
-		b.log.Printf("Got an empty set of options to update channel")
-		return
+func (b *Bot) updateChannelFromOpts(guildID string, opts ...string) (string, error) {
+	if len(opts) < 1 {
+		return "", fmt.Errorf("didn't pass a verb to the update channel command")
 	}
-	cmd := options[0]
-	resp := ""
-	switch cmd.Name {
-	case "get":
-		// Respond the current channel if set
-		if val, ok := b.servers[i.GuildID]; ok {
-			resp = fmt.Sprintf("The current update channel is <#%v>", val.UpdateChannel)
-		} else {
-			resp = "The current update channel is unset"
+	server, err := b.ServerFor(guildID)
+	if err != nil {
+		return "", fmt.Errorf("couldn't get server for guild id %v: %v", guildID, err)
+	}
+	verb := opts[0]
+	if verb == "get" {
+		return fmt.Sprintf("The current update channel is %v", server.GetChannel()), nil
+	} else if verb == "set" {
+		if len(opts) < 2 {
+			return "", fmt.Errorf("didn't pass a channel to be set")
 		}
-	case "set":
-		// Check if the channel is valid and if so, set the channel and respond with a status
-		if len(cmd.Options) < 1 {
-			b.log.Printf("Got no channel ID for set operation")
-			return
+
+		channelID := opts[1]
+		if err := server.SetChannel(channelID); err != nil {
+			return "", err
 		}
-		channel := cmd.Options[0].ChannelValue(b.session)
-		if channel != nil && channel.Type == discord.ChannelTypeGuildText {
-			b.servers[i.GuildID] = Server{
-				UpdateChannel: channel.ID,
-			}
-			b.log.Printf("Setting update channel to %v for server %v", channel.ID, i.GuildID)
-			resp = fmt.Sprintf("Success! The new update channel is <#%v>", channel.ID)
-		} else {
-			resp = "Channel passed is invalid; please try again with a valid channel"
+
+		return fmt.Sprintf("Success! The new update channel is %v", server.GetChannel()), nil
+	} else {
+		return "", fmt.Errorf("didn't pass a valid verb to the update channel command (%v)", verb)
+	}
+}
+
+func (b *Bot) onUpdateChannel(i *discord.InteractionCreate) {
+	opts := []string{}
+	// First is a verb, if it exists
+	for _, verb := range i.ApplicationCommandData().Options {
+		opts = append(opts, verb.Name)
+		// Second are actual options with values passed by the user
+		for _, opt := range verb.Options {
+			// This sucks
+			opts = append(opts, opt.ChannelValue(b.session).ID)
 		}
-	default:
-		b.log.Printf("Got invalid subcommand name for update channel command")
-		return
+	}
+
+	resp, err := b.updateChannelFromOpts(i.GuildID, opts...)
+	if err != nil {
+		resp = fmt.Sprintf(":warning: Failed with error: %v", err)
 	}
 
 	if err := b.session.InteractionRespond(i.Interaction, &discord.InteractionResponse{
@@ -71,7 +78,7 @@ func (b *Bot) embedsFromVerb(verb string) ([]*discord.MessageEmbed, error) {
 	}
 	// We only need the account for this one
 	if verb == "short" {
-		return b.shortEmbed(account), nil
+		return b.shortEmbed(account)
 	}
 
 	matches, err := b.matchesByPerformance(account)
@@ -79,6 +86,7 @@ func (b *Bot) embedsFromVerb(verb string) ([]*discord.MessageEmbed, error) {
 		return nil, err
 	}
 
+	// Who needs clean code??? What is that even???
 	embedFunc := (func(*riot.Account, []*riot.Match) ([]*discord.MessageEmbed, error))(nil)
 	switch verb {
 	case "best":
@@ -141,15 +149,28 @@ func (b *Bot) onMessage(_ *discord.Session, m *discord.MessageCreate) {
 	embeds, err := b.embedsFromVerb("all")
 	if err != nil {
 		b.log.Printf("Error retrieving stats for user: %v", err)
-		// Ignoring error if reply isn't sent because it isn't so useful
-		if _, err := b.session.ChannelMessageSendReply(m.ChannelID, err.Error(), m.Reference()); err != nil {
-			b.log.Printf("Error sending error replying to message: %v", err)
-		}
 	} else {
 		if _, err := b.session.ChannelMessageSendEmbedsReply(m.ChannelID, embeds, m.Reference()); err != nil {
 			b.log.Printf("Error sending reply to message: %v", err)
 		}
 	}
+}
+
+func (b *Bot) onStatTick() {
+	b.log.Printf("Ticked, sending updated stats")
+	// TODO: Add back tickers but custom per server
+	/*
+		for _, server := range b.servers {
+			embeds, err := b.embedsFromVerb("all")
+			if err != nil {
+				b.log.Printf("Error retrieving stats for user: %v", err)
+			} else {
+				if _, err := b.session.ChannelMessageSendEmbeds(server.UpdateChannel, embeds); err != nil {
+					b.log.Printf("Error sending update message: %v", err)
+				}
+			}
+		}
+	*/
 }
 
 // Actually add the functionality to the bot
@@ -243,6 +264,13 @@ func (b *Bot) addListeners() error {
 		}
 	})
 	b.session.AddHandler(b.onMessage)
+	// Create a ticker to send stats every once in a while
+	b.ticker = time.NewTicker(time.Minute)
+	go func() {
+		for range b.ticker.C {
+			b.onStatTick()
+		}
+	}()
 
 	return nil
 }

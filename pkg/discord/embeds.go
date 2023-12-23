@@ -92,7 +92,18 @@ func (b *Bot) matchesByPerformance(account *riot.Account) ([]*riot.Match, error)
 	}
 }
 
-func (b *Bot) shortEmbed(account *riot.Account) []*discord.MessageEmbed {
+func (b *Bot) shortEmbed(account *riot.Account) ([]*discord.MessageEmbed, error) {
+	top, err := b.client.TopChampionsByMastery(account, 1)
+	if err != nil {
+		return nil, err
+	}
+	mastery := top[0]
+	champ, err := b.client.ChampionByID(int(mastery.ChampionID))
+	if err != nil {
+		return nil, err
+	}
+	champURL := b.client.IconURLForChamp(champ)
+
 	return []*discord.MessageEmbed{
 		{
 			Color: 0xF7F12F,
@@ -104,24 +115,44 @@ func (b *Bot) shortEmbed(account *riot.Account) []*discord.MessageEmbed {
 				URL: account.RankURL,
 			},
 			Description: fmt.Sprintf(
-				"**%v** / %v LP\n"+
-					"**%v** wins / **%v** losses (%v%% winrate)\n",
+				"**%v** / %v LP\n",
 				account.Rank, account.Points,
-				account.Wins, account.Losses, account.Wins*100/(account.Wins+account.Losses),
 			),
 			Footer: &discord.MessageEmbedFooter{
 				Text: "Account stats",
 			},
+			Image: &discord.MessageEmbedImage{
+				URL: champURL,
+			},
+			Fields: []*discord.MessageEmbedField{
+				{
+					Name:   "Wins",
+					Value:  fmt.Sprint(account.Wins),
+					Inline: true,
+				},
+				{
+					Name:   "Losses",
+					Value:  fmt.Sprint(account.Losses),
+					Inline: true,
+				},
+				{
+					Name:   "Winrate",
+					Value:  fmt.Sprintf("%v%%", int(account.Winrate())),
+					Inline: true,
+				},
+				{
+					Name:   "Top mastery",
+					Value:  champ.Name,
+					Inline: true,
+				},
+				{
+					Name:   "Mastery points",
+					Value:  fmt.Sprint(mastery.ChampionPoints),
+					Inline: true,
+				},
+			},
 		},
-	}
-}
-
-func concatSlices[Slice ~[]Elem, Elem any](slices ...Slice) Slice {
-	out := Slice{}
-	for _, slice := range slices {
-		out = append(out, slice...)
-	}
-	return out
+	}, nil
 }
 
 func (b *Bot) allEmbed(account *riot.Account, matches []*riot.Match) ([]*discord.MessageEmbed, error) {
@@ -133,9 +164,16 @@ func (b *Bot) allEmbed(account *riot.Account, matches []*riot.Match) ([]*discord
 	if err != nil {
 		return nil, err
 	}
-	return concatSlices(
-		b.shortEmbed(account),
-		bestMatch,
-		worstMatch,
+	short, err := b.shortEmbed(account)
+	if err != nil {
+		return nil, err
+	}
+	// This is slightly ugly but whatever it works
+	return append(
+		short,
+		append(
+			bestMatch,
+			worstMatch...,
+		)...,
 	), nil
 }
