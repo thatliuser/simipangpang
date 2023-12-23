@@ -193,6 +193,11 @@ func (s *Server) GetChannel() string {
 	}
 }
 
+func (s *Server) ResetChannel() {
+	s.log.Printf("Resetting update channel for server %v", s.guild.ID)
+	s.channel = nil
+}
+
 // This should be spawned in a Goroutine to listen to ticks
 func (s *Server) tick() {
 	for {
@@ -235,6 +240,13 @@ func (s *Server) GetPeriod() int64 {
 	return int64(s.period.Minutes())
 }
 
+func (s *Server) ResetPeriod() {
+	s.period = 0
+	s.log.Printf("Resetting period for server %v, freeing timer", s.guild.ID)
+	s.ticker.Stop()
+	s.ticker = nil
+}
+
 func (s *Server) Stop() {
 	if s.ticker != nil {
 		s.ticker.Stop()
@@ -274,9 +286,14 @@ func ServerFromFile(bot *Bot, output io.Writer, guildID string) (*Server, error)
 }
 
 func AllServerIDs() ([]string, error) {
+	// Fix for Linux (stat fails otherwise)
+	if err := os.MkdirAll(stateDir, dirMode); err != nil {
+		return nil, fmt.Errorf("failed to create directory: %v", err)
+	}
+
 	ids := []string{}
 	err := fs.WalkDir(os.DirFS(stateDir), ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
+		if err != nil && err != os.ErrNotExist {
 			return err
 		}
 

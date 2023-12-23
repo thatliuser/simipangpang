@@ -23,6 +23,9 @@ func (b *Bot) updateChannelFromVerb(server *Server, verb string, opts ...*discor
 			return "", err
 		}
 		return fmt.Sprintf("Success! The new update channel is %v", server.GetChannel()), nil
+	case "reset":
+		server.ResetChannel()
+		return "Success! The update channel has been reset", nil
 	default:
 		return "", fmt.Errorf("didn't pass a valid verb to the update channel command (%v)", verb)
 	}
@@ -47,6 +50,9 @@ func (b *Bot) updatePeriodFromVerb(server *Server, verb string, opts ...int64) (
 			return "", err
 		}
 		return fmt.Sprintf("Success! The new update period is %v minutes", server.GetPeriod()), nil
+	case "reset":
+		server.ResetPeriod()
+		return "Success! The update period has been reset", nil
 	default:
 		return "", fmt.Errorf("didn't pass a valid verb to the update period command (%v)", verb)
 	}
@@ -222,6 +228,11 @@ func newUpdateSetting(name string, descName string, varType discord.ApplicationC
 						Required:    true,
 					},
 				},
+			},
+			{
+				Name:        "reset",
+				Description: fmt.Sprintf("Reset the %v for the server", descName),
+				Type:        discord.ApplicationCommandOptionSubCommand,
 			},
 		},
 	}
