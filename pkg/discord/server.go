@@ -1,4 +1,4 @@
-// Per-server stuff
+// Individual server (guild) state
 
 package discord
 
@@ -6,23 +6,31 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"log"
 	"os"
 	"strings"
+	"time"
 
 	discord "github.com/bwmarrin/discordgo"
 )
 
 // Stuff that gets JSON'ed
-type ServerState struct {
-	GuildID   string `json:"guild_id"`
-	ChannelID string `json:"channel_id"`
+type serverState struct {
+	GuildID       string `json:"guild_id"`
+	ChannelID     string `json:"channel_id"`
+	PeriodMinutes int64  `json:"period_minutes"`
 }
 
 type Server struct {
-	session *discord.Session
+	log     *log.Logger
+	bot     *Bot
 	guild   *discord.Guild
 	channel *discord.Channel
+	period  time.Duration // Should be in minutes
+	ticker  *time.Ticker
+	done    chan struct{}
 }
 
 const (
@@ -66,24 +74,30 @@ func (s *Server) writeFile(name string, data []byte) error {
 	return nil
 }
 
-func (s *Server) Load(state ServerState) error {
-	guild, err := Guild(s.session, state.GuildID)
+func (s *Server) Load(state serverState) error {
+	guild, err := s.bot.GuildByID(state.GuildID)
 	if err != nil {
 		return fmt.Errorf("couldn't lookup guild %v by id: %v", state.GuildID, err)
 	}
 	s.guild = guild
 
-	if state.ChannelID == "" {
-		// No update channel set, so return early
+	if state.ChannelID != "" {
+		// Validate channel ID since it's set
+		channel, err := s.bot.ChannelByID(state.ChannelID)
+		if err != nil {
+			return fmt.Errorf("couldn't lookup channel %v by id: %v", state.ChannelID, err)
+		}
+		s.channel = channel
+	} else {
 		s.channel = nil
-		return nil
 	}
 
-	channel, err := Channel(s.session, state.ChannelID)
-	if err != nil {
-		return fmt.Errorf("couldn't lookup channel %v by id: %v", state.ChannelID, err)
+	if state.PeriodMinutes != 0 {
+		// Validate period since it's set
+		if err := s.SetPeriod(state.PeriodMinutes); err != nil {
+			return fmt.Errorf("invalid period: %v", err)
+		}
 	}
-	s.channel = channel
 
 	return nil
 }
@@ -96,7 +110,7 @@ func (s *Server) LoadFile() error {
 		// No savefile but it's fine
 		return nil
 	}
-	state := ServerState{}
+	state := serverState{}
 	if err := json.Unmarshal(contents, &state); err != nil {
 		return fmt.Errorf("couldn't unmarshal contents: %v", err)
 	}
@@ -125,12 +139,18 @@ func (s *Server) Save() error {
 		return fmt.Errorf("couldn't copy contents to backup: %v", err)
 	}
 
-	state := ServerState{
-		GuildID:   s.guild.ID,
-		ChannelID: "",
+	state := serverState{
+		GuildID:       s.guild.ID,
+		ChannelID:     "",
+		PeriodMinutes: 0,
 	}
+	// Conditionally set these values
 	if s.channel != nil {
 		state.ChannelID = s.channel.ID
+	}
+	period := int64(s.period.Minutes())
+	if period != 0 {
+		state.PeriodMinutes = period
 	}
 
 	data, err := json.MarshalIndent(&state, "", "\t")
@@ -141,16 +161,18 @@ func (s *Server) Save() error {
 		return fmt.Errorf("couldn't save server: %v", err)
 	}
 
+	s.log.Printf("Saved server %v", s.guild.ID)
+
 	return nil
 }
 
 func (s *Server) SetChannel(channelID string) error {
-	channel, err := Channel(s.session, channelID)
+	channel, err := s.bot.ChannelByID(channelID)
 	if err != nil {
 		return fmt.Errorf("couldn't validate channel from id %v: %v", channelID, err)
 	}
-	me := s.session.State.User
-	perms, err := UserChannelPermissions(s.session, me.ID, channel.ID)
+	me := s.bot.User()
+	perms, err := s.bot.PermsByIDs(me.ID, channel.ID)
 	if err != nil {
 		return fmt.Errorf("couldn't retrieve bot permissions for channel %v: %v", channel.Mention(), err)
 	}
@@ -159,6 +181,7 @@ func (s *Server) SetChannel(channelID string) error {
 	}
 
 	s.channel = channel
+	s.log.Printf("Setting update channel for server %v to %v", s.guild.ID, s.channel.Mention())
 	return nil
 }
 
@@ -170,9 +193,64 @@ func (s *Server) GetChannel() string {
 	}
 }
 
-func NewServer(session *discord.Session, state ServerState) (*Server, error) {
+// This should be spawned in a Goroutine to listen to ticks
+func (s *Server) tick() {
+	for {
+		select {
+		case <-s.ticker.C:
+			if s.channel != nil {
+				s.bot.UpdateTick(s.channel)
+			}
+		case <-s.done:
+			return
+		}
+	}
+}
+
+func (s *Server) refreshTicker() {
+	if s.ticker == nil {
+		s.log.Printf("Detected nil ticker, creating new ticker for server %v", s.guild.ID)
+		// Setup ticker logic if not initialized
+		s.ticker = time.NewTicker(s.period)
+		s.done = make(chan struct{})
+		go s.tick()
+	}
+	s.ticker.Reset(s.period)
+}
+
+func (s *Server) SetPeriod(minutes int64) error {
+	if minutes <= 0 {
+		return fmt.Errorf("negative or zero period not allowed")
+	}
+
+	period := time.Duration(minutes) * time.Minute
+	s.period = period
+	s.log.Printf("Set period for server %v to %v", s.guild.ID, s.period)
+
+	s.refreshTicker()
+	return nil
+}
+
+func (s *Server) GetPeriod() int64 {
+	return int64(s.period.Minutes())
+}
+
+func (s *Server) Stop() {
+	if s.ticker != nil {
+		s.ticker.Stop()
+	}
+	if s.done != nil {
+		s.done <- struct{}{}
+	}
+}
+
+func NewServer(bot *Bot, output io.Writer, guildID string) (*Server, error) {
 	s := &Server{
-		session: session,
+		bot: bot,
+		log: log.New(output, "discord.Server: ", log.Ldate|log.Ltime),
+	}
+	state := serverState{
+		GuildID: guildID,
 	}
 	if err := s.Load(state); err != nil {
 		return nil, fmt.Errorf("couldn't create server: %v", err)
@@ -181,12 +259,9 @@ func NewServer(session *discord.Session, state ServerState) (*Server, error) {
 	return s, nil
 }
 
-func ServerFromFile(session *discord.Session, guildID string) (*Server, error) {
+func ServerFromFile(bot *Bot, output io.Writer, guildID string) (*Server, error) {
 	// Preliminary load so SaveFileName() doesn't deref a nil pointer
-	s, err := NewServer(session, ServerState{
-		GuildID:   guildID,
-		ChannelID: "",
-	})
+	s, err := NewServer(bot, output, guildID)
 	if err != nil {
 		return nil, err
 	}

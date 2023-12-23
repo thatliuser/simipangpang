@@ -7,38 +7,38 @@ import (
 )
 
 // Getter wrappers
-func Channel(s *discord.Session, channelID string) (*discord.Channel, error) {
-	channel, err := s.State.Channel(channelID)
+func (b *Bot) ChannelByID(channelID string) (*discord.Channel, error) {
+	channel, err := b.session.State.Channel(channelID)
 	if err != nil {
-		channel, err = s.Channel(channelID)
+		channel, err = b.session.Channel(channelID)
 		if err != nil {
 			return nil, err
 		}
-		s.State.ChannelAdd(channel)
+		b.session.State.ChannelAdd(channel)
 	}
 
 	return channel, nil
 }
 
-func Guild(s *discord.Session, guildID string) (*discord.Guild, error) {
+func (b *Bot) GuildByID(guildID string) (*discord.Guild, error) {
 	// We can't used a cached guild because the roles aren't necessarily saved in the cache
-	guild, err := s.Guild(guildID)
+	guild, err := b.session.Guild(guildID)
 	if err != nil {
 		return nil, err
 	}
-	s.State.GuildAdd(guild)
+	b.session.State.GuildAdd(guild)
 
 	return guild, nil
 }
 
-func Member(s *discord.Session, guildID string, userID string) (*discord.Member, error) {
-	member, err := s.State.Member(guildID, userID)
+func (b *Bot) MemberByIDs(guildID string, userID string) (*discord.Member, error) {
+	member, err := b.session.State.Member(guildID, userID)
 	if err != nil {
-		member, err = s.GuildMember(guildID, userID)
+		member, err = b.session.GuildMember(guildID, userID)
 		if err != nil {
 			return nil, err
 		}
-		s.State.MemberAdd(member)
+		b.session.State.MemberAdd(member)
 	}
 	return member, nil
 }
@@ -46,28 +46,32 @@ func Member(s *discord.Session, guildID string, userID string) (*discord.Member,
 // This is stupid
 // The method discord.Session.UserChannelPermissions is deprecated so this is my own wrapper
 // Tries the cache, then adds stuff required to the cache if that failed
-func UserChannelPermissions(s *discord.Session, userID string, channelID string) (int64, error) {
+func (b *Bot) PermsByIDs(userID string, channelID string) (int64, error) {
 	// Try state cache
-	perms, err := s.State.UserChannelPermissions(userID, channelID)
+	perms, err := b.session.State.UserChannelPermissions(userID, channelID)
 	if err == nil {
 		return perms, nil
 	}
 
 	// If that doesn't work add the variables needed to the state cache before calling it again
-	channel, err := Channel(s, channelID)
+	channel, err := b.ChannelByID(channelID)
 	if err != nil {
 		return 0, err
 	}
 
-	guild, err := Guild(s, channel.GuildID)
+	guild, err := b.GuildByID(channel.GuildID)
 	if err != nil {
 		return 0, err
 	}
 
-	_, err = Member(s, guild.ID, userID)
+	_, err = b.MemberByIDs(guild.ID, userID)
 	if err != nil {
 		return 0, err
 	}
 
-	return s.State.UserChannelPermissions(userID, channelID)
+	return b.session.State.UserChannelPermissions(userID, channelID)
+}
+
+func (b *Bot) User() *discord.User {
+	return b.session.State.User
 }

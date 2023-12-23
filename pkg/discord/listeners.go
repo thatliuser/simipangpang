@@ -1,56 +1,98 @@
 // Event listeners that tie everything together (and util to go along with them)
-
 package discord
 
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	discord "github.com/bwmarrin/discordgo"
 	"github.com/thatliuser/simipangpang/pkg/riot"
 )
 
-func (b *Bot) updateChannelFromOpts(guildID string, opts ...string) (string, error) {
-	if len(opts) < 1 {
-		return "", fmt.Errorf("didn't pass a verb to the update channel command")
-	}
-	server, err := b.ServerFor(guildID)
-	if err != nil {
-		return "", fmt.Errorf("couldn't get server for guild id %v: %v", guildID, err)
-	}
-	verb := opts[0]
-	if verb == "get" {
+func (b *Bot) updateChannelFromVerb(server *Server, verb string, opts ...*discord.Channel) (string, error) {
+	switch verb {
+	case "get":
 		return fmt.Sprintf("The current update channel is %v", server.GetChannel()), nil
-	} else if verb == "set" {
-		if len(opts) < 2 {
+	case "set":
+		if len(opts) != 1 {
 			return "", fmt.Errorf("didn't pass a channel to be set")
 		}
 
-		channelID := opts[1]
-		if err := server.SetChannel(channelID); err != nil {
+		channel := opts[0]
+		if err := server.SetChannel(channel.ID); err != nil {
 			return "", err
 		}
-
 		return fmt.Sprintf("Success! The new update channel is %v", server.GetChannel()), nil
-	} else {
+	default:
 		return "", fmt.Errorf("didn't pass a valid verb to the update channel command (%v)", verb)
 	}
 }
 
-func (b *Bot) onUpdateChannel(i *discord.InteractionCreate) {
-	opts := []string{}
-	// First is a verb, if it exists
-	for _, verb := range i.ApplicationCommandData().Options {
-		opts = append(opts, verb.Name)
-		// Second are actual options with values passed by the user
-		for _, opt := range verb.Options {
-			// This sucks
-			opts = append(opts, opt.ChannelValue(b.session).ID)
+func (b *Bot) updatePeriodFromVerb(server *Server, verb string, opts ...int64) (string, error) {
+	switch verb {
+	case "get":
+		period := server.GetPeriod()
+		if period == 0 {
+			return "The current update period is unset", nil
+		} else {
+			return fmt.Sprintf("The current update period is %v minutes", period), nil
 		}
+	case "set":
+		if len(opts) != 1 {
+			return "", fmt.Errorf("didn't pass a period to be set")
+		}
+
+		period := opts[0]
+		if err := server.SetPeriod(period); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Success! The new update period is %v minutes", server.GetPeriod()), nil
+	default:
+		return "", fmt.Errorf("didn't pass a valid verb to the update period command (%v)", verb)
+	}
+}
+
+func (b *Bot) updateSettingFromVerb(guildID string, setting string, verb string, opts ...*discord.ApplicationCommandInteractionDataOption) (string, error) {
+	server, err := b.ServerFor(guildID)
+	if err != nil {
+		return "", fmt.Errorf("couldn't get server for guild id %v: %v", guildID, err)
+	}
+	switch setting {
+	case "channel":
+		// Realistically this should always be 0 or 1 but it's annoying to express that in Go
+		channels := []*discord.Channel{}
+		for _, opt := range opts {
+			channels = append(channels, opt.ChannelValue(b.session))
+		}
+		return b.updateChannelFromVerb(server, verb, channels...)
+	case "period":
+		periods := []int64{}
+		for _, opt := range opts {
+			periods = append(periods, opt.IntValue())
+		}
+		return b.updatePeriodFromVerb(server, verb, periods...)
+	default:
+		return "", fmt.Errorf("didn't pass a valid option to the update setting command (%v)", setting)
+	}
+}
+
+func (b *Bot) onUpdateConfig(i *discord.InteractionCreate) {
+	// Validate input format
+	settingList := i.ApplicationCommandData().Options
+	if len(settingList) != 1 {
+		return
 	}
 
-	resp, err := b.updateChannelFromOpts(i.GuildID, opts...)
+	// Setting option to be modified / viewed
+	setting := settingList[0]
+	if len(setting.Options) != 1 {
+		return
+	}
+	// Whether to get or set the setting
+	verb := setting.Options[0]
+	opts := verb.Options
+
+	resp, err := b.updateSettingFromVerb(i.GuildID, setting.Name, verb.Name, opts...)
 	if err != nil {
 		resp = fmt.Sprintf(":warning: Failed with error: %v", err)
 	}
@@ -103,16 +145,17 @@ func (b *Bot) embedsFromVerb(verb string) ([]*discord.MessageEmbed, error) {
 }
 
 func (b *Bot) onStats(i *discord.InteractionCreate) {
+	// Validate input format
+	options := i.ApplicationCommandData().Options
+	if len(options) != 1 {
+		// Don't respond so it errors
+		return
+	}
+
 	// Acknowledge the interaction first
 	b.session.InteractionRespond(i.Interaction, &discord.InteractionResponse{
 		Type: discord.InteractionResponseDeferredChannelMessageWithSource,
 	})
-
-	options := i.ApplicationCommandData().Options
-	if len(options) != 1 {
-		b.log.Printf("Length of options is too short or too long (%v)", len(options))
-		return
-	}
 
 	embeds, err := b.embedsFromVerb(options[0].Name)
 
@@ -156,21 +199,32 @@ func (b *Bot) onMessage(_ *discord.Session, m *discord.MessageCreate) {
 	}
 }
 
-func (b *Bot) onStatTick() {
-	b.log.Printf("Ticked, sending updated stats")
-	// TODO: Add back tickers but custom per server
-	/*
-		for _, server := range b.servers {
-			embeds, err := b.embedsFromVerb("all")
-			if err != nil {
-				b.log.Printf("Error retrieving stats for user: %v", err)
-			} else {
-				if _, err := b.session.ChannelMessageSendEmbeds(server.UpdateChannel, embeds); err != nil {
-					b.log.Printf("Error sending update message: %v", err)
-				}
-			}
-		}
-	*/
+func newUpdateSetting(name string, descName string, varType discord.ApplicationCommandOptionType) *discord.ApplicationCommandOption {
+	return &discord.ApplicationCommandOption{
+		Name:        name,
+		Description: fmt.Sprintf("Set or get the %v for the server", descName),
+		Type:        discord.ApplicationCommandOptionSubCommandGroup,
+		Options: []*discord.ApplicationCommandOption{
+			{
+				Name:        "get",
+				Description: fmt.Sprintf("Get the %v for the server", descName),
+				Type:        discord.ApplicationCommandOptionSubCommand,
+			},
+			{
+				Name:        "set",
+				Description: fmt.Sprintf("Set the %v for the server", descName),
+				Type:        discord.ApplicationCommandOptionSubCommand,
+				Options: []*discord.ApplicationCommandOption{
+					{
+						Name:        name,
+						Description: fmt.Sprintf("The new %v to be set", descName),
+						Type:        varType,
+						Required:    true,
+					},
+				},
+			},
+		},
+	}
 }
 
 // Actually add the functionality to the bot
@@ -187,33 +241,17 @@ func (b *Bot) addListeners() error {
 	commands := []Command{
 		{
 			command: &discord.ApplicationCommand{
-				Name:        "update_channel",
+				Name:        "update",
 				Description: "Set or get the update channel for the server",
 				Type:        discord.ChatApplicationCommand,
-				// WTF is the point of this
+				// WTF is the point of making this a pointer
 				DefaultMemberPermissions: &manage,
 				Options: []*discord.ApplicationCommandOption{
-					{
-						Name:        "get",
-						Description: "Get the update channel for the server",
-						Type:        discord.ApplicationCommandOptionSubCommand,
-					},
-					{
-						Name:        "set",
-						Description: "Set the update channel for the server",
-						Type:        discord.ApplicationCommandOptionSubCommand,
-						Options: []*discord.ApplicationCommandOption{
-							{
-								Name:        "channel",
-								Description: "The new channel to be set as the update channel",
-								Type:        discord.ApplicationCommandOptionChannel,
-								Required:    true,
-							},
-						},
-					},
+					newUpdateSetting("channel", "update channel", discord.ApplicationCommandOptionChannel),
+					newUpdateSetting("period", "update period (in minutes)", discord.ApplicationCommandOptionInteger),
 				},
 			},
-			handler: b.onUpdateChannel,
+			handler: b.onUpdateConfig,
 		},
 		{
 			command: &discord.ApplicationCommand{
@@ -264,13 +302,6 @@ func (b *Bot) addListeners() error {
 		}
 	})
 	b.session.AddHandler(b.onMessage)
-	// Create a ticker to send stats every once in a while
-	b.ticker = time.NewTicker(time.Minute)
-	go func() {
-		for range b.ticker.C {
-			b.onStatTick()
-		}
-	}()
 
 	return nil
 }

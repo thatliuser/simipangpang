@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"time"
 
 	discord "github.com/bwmarrin/discordgo"
 	"github.com/thatliuser/simipangpang/pkg/riot"
@@ -20,7 +19,6 @@ type Bot struct {
 	client  *riot.Client
 	log     *log.Logger
 	servers map[string]*Server
-	ticker  *time.Ticker
 }
 
 const (
@@ -33,7 +31,7 @@ func (b *Bot) Load() error {
 		return fmt.Errorf("couldn't get all server ids: %v", err)
 	}
 	for _, id := range ids {
-		server, err := ServerFromFile(b.session, id)
+		server, err := ServerFromFile(b, b.log.Writer(), id)
 		if err != nil {
 			b.log.Printf("Couldn't load server with ID %v: %v", id, err)
 		} else {
@@ -93,7 +91,8 @@ func (b *Bot) Run(ctx context.Context) error {
 }
 
 func (b *Bot) Stop() {
-	if b.ticker != nil {
-		b.ticker.Stop()
+	b.log.Println("Stopping all servers")
+	for _, server := range b.servers {
+		server.Stop()
 	}
 }
