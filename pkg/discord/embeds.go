@@ -11,9 +11,25 @@ import (
 	"github.com/thatliuser/simipangpang/pkg/riot"
 )
 
+func (b *Bot) emptyMatch(account *riot.Account, caption string) ([]*discord.MessageEmbed, error) {
+	return []*discord.MessageEmbed{
+		{
+			Color: 0x5E5D5D,
+			Author: &discord.MessageEmbedAuthor{
+				Name:    fmt.Sprintf("%v#%v", account.Name, account.Discrim),
+				IconURL: account.IconURL,
+			},
+			Description: "No matches found",
+			Footer: &discord.MessageEmbedFooter{
+				Text: caption,
+			},
+		},
+	}, nil
+}
+
 func (b *Bot) matchEmbed(account *riot.Account, match *riot.Match, caption string) ([]*discord.MessageEmbed, error) {
-	colorForWin := func(won bool) int {
-		if won {
+	colorForWin := func(match *riot.Match) int {
+		if match.Won {
 			// Green-ish
 			return 0x6EEB34
 		} else {
@@ -22,6 +38,9 @@ func (b *Bot) matchEmbed(account *riot.Account, match *riot.Match, caption strin
 		}
 	}
 	descForMatch := func(match *riot.Match) string {
+		if match == nil {
+			return "No matches found"
+		}
 		won := ""
 		if match.Won {
 			won = "Victory"
@@ -37,7 +56,7 @@ func (b *Bot) matchEmbed(account *riot.Account, match *riot.Match, caption strin
 	champURL := b.client.IconURLForChamp(champ)
 	return []*discord.MessageEmbed{
 		{
-			Color: colorForWin(match.Won),
+			Color: colorForWin(match),
 			Author: &discord.MessageEmbedAuthor{
 				Name:    fmt.Sprintf("%v#%v", account.Name, account.Discrim),
 				IconURL: account.IconURL,
@@ -72,14 +91,24 @@ func (b *Bot) matchEmbed(account *riot.Account, match *riot.Match, caption strin
 
 // Assumes matches are sorted by performance
 func (b *Bot) bestMatchEmbed(account *riot.Account, matches []*riot.Match) ([]*discord.MessageEmbed, error) {
+	caption := "Best match this week"
+	if len(matches) < 1 {
+		return b.emptyMatch(account, caption)
+	}
+
 	bestMatch := matches[len(matches)-1]
-	return b.matchEmbed(account, bestMatch, "Best match this week")
+	return b.matchEmbed(account, bestMatch, caption)
 }
 
 // Assumes matches are sorted by performance
 func (b *Bot) worstMatchEmbed(account *riot.Account, matches []*riot.Match) ([]*discord.MessageEmbed, error) {
+	caption := "Worst match this week"
+	if len(matches) < 1 {
+		return b.emptyMatch(account, caption)
+	}
+
 	worstMatch := matches[0]
-	return b.matchEmbed(account, worstMatch, "Worst match this week")
+	return b.matchEmbed(account, worstMatch, caption)
 }
 
 func (b *Bot) matchesByPerformance(account *riot.Account) ([]*riot.Match, error) {

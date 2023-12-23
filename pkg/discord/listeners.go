@@ -195,7 +195,7 @@ func (b *Bot) onMessage(_ *discord.Session, m *discord.MessageCreate) {
 
 	b.log.Printf("Got message '%v' from %v", m.Content, m.Author.Username)
 
-	embeds, err := b.embedsFromVerb("all")
+	embeds, err := b.embedsFromVerb("short")
 	if err != nil {
 		b.log.Printf("Error retrieving stats for user: %v", err)
 	} else {
